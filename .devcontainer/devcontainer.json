@@ -1,0 +1,63 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the README at:
+// https://github.com/microsoft/vscode-dev-containers/tree/v0.140.1/containers/cpp
+{
+	"name": "DataSerialiser",
+	"service": "binarez",
+	"dockerComposeFile": "docker-compose.yml",
+
+	// Add the IDs of extensions you want installed when the container is created.
+	"customizations": {
+    "vscode": {
+      "settings": {
+        // "terminal.integrated.defaultProfile.linux": "bash"
+				"C_Cpp.default.compilerPath": "/usr/bin/gcc",
+				"C_Cpp.default.includePath": [
+					"../include",
+					"/usr/include"
+				]
+			},
+
+			"extensions": [
+				"ms-vscode.cpptools",
+				// "jbenden.c-cpp-flylint",
+				"jeff-hykin.better-cpp-syntax",
+				"stkb.rewrap",
+
+				//"ms-vscode.cpptools-themes",
+				"ms-vscode.cpptools-extension-pack",
+
+				"ms-vscode.hexeditor",
+				"nextarg.disassembly-view",
+
+				"xaver.clang-format",
+				"notskm.clang-tidy",
+
+				// "ms-vscode.cmake-tools",
+				// "fredericbonnet.cmake-test-adapter",
+
+				// "tabnine.tabnine-vscode",
+				// "vadimcn.vscode-lldb",
+				// "llvm-vs-code-extensions.vscode-clangd",
+				"ajshort.include-autocomplete",
+				
+				"cheshirekow.cmake-format"
+				// Kr4is.cpptools-extension-pack  (ALL INCLUDES)
+			]
+    }
+  },
+
+	// "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=delegated",
+	// "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+	// "features": {
+	// 	"git": "latest",
+	// 	"git-lfs": "latest",
+	// 	"powershell": "latest"
+	// },
+
+	"workspaceFolder": "/home/work"
+
+	// Uncomment to connect as a non-root user. See https://aka.ms/vscode-remote/containers/non-root.
+	// "remoteUser": "vscode"
+	// "remoteUser": "docker"
+}
+

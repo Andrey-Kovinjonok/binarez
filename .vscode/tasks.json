@@ -1,0 +1,36 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "DEBUG BUILD TASK",
+        "type": "shell",
+        "dependsOn": "_MakeDebugFolder",
+        "options": {
+          // "cwd": "${workspaceFolder}/DebugVS"
+          "cwd": "/home/work/DebugVS"
+        },
+
+        "command": "cmake CMakeLists.txt -DCMAKE_BUILD_TYPE=Debug ./ -S ../ -B ./ && make -j 4",
+  
+        // "args": [
+        //   "-fdiagnostics-color=always",
+        //   "-g",
+        //   // "-I${workspaceFolder}/ExtLib/Userver"
+        //   "-I$/usr/lib/gcc/aarch64-linux-gnu/14/include"
+        // ],
+        "group": {
+          "kind": "build",
+          "isDefault": true
+        }
+      },
+      {
+        "label": "_MakeDebugFolder",
+        "type": "shell",
+        "command": "mkdir -p ${workspaceFolder}/DebugVS",
+        "problemMatcher": [],
+        "group": "none"
+      },
+
+    ]
+  }
+  

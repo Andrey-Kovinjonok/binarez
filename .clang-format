@@ -1,0 +1,53 @@
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++17
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+
+ColumnLimit: 80
+
+# BreakBeforeCatch: true
+BreakBeforeBraces: Attach
+#BreakBeforeBraces: Custom
+#BraceWrapping:
+#  AfterClass: true    # Attach
+#  AfterFunction: false # K&R
+# AfterControlStatement: MultiLine
+
+# alignment
+AlignAfterOpenBracket: AlwaysBreak
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignOperands: DontAlign # no columns aluigns // Align
+AlignTrailingComments: true
+
+BinPackParameters: false
+BreakInheritanceList: BeforeComma
+BreakBeforeBinaryOperators: NonAssignment
+PointerAlignment: Left
+
+# spaces
+SpaceAfterCStyleCast: true
+SpaceAfterTemplateKeyword: false
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpacesInAngles: Never
+SpacesInParentheses: false
+
+# functions blocks templates
+AllowShortFunctionsOnASingleLine: Empty #
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowAllArgumentsOnNextLine: false
+AllowShortBlocksOnASingleLine: Empty
+
+# other settings
+AccessModifierOffset: -4  #
+FixNamespaceComments: true
+SortIncludes: true
+NamespaceIndentation: All

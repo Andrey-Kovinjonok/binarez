@@ -1,0 +1,29 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "/usr/include/c++/14",
+                "/usr/include/boost/",
+                "/usr/lib/gcc/aarch64-linux-gnu/14/include",
+                "/usr/include"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard":"gnu23",
+            "cppStandard": "c++23",
+            "browse": {
+                "path": [
+                    "/usr/include/c++/14",
+                    "/usr/lib/gcc/aarch64-linux-gnu/14/include",
+                    "/usr/include",
+                    "/usr/include/boost/"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": ""
+            },
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}

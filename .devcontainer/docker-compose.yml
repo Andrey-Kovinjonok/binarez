@@ -1,0 +1,31 @@
+
+version: '3.1'
+
+services:
+  binarez:
+
+    build:
+
+      context: ../
+      dockerfile: ./docker/Dockerfile-alpine
+
+      args:
+          COMMON_IGNORE: "true"
+
+    container_name: "binarez-container"
+
+    volumes:
+      - "../.:/home/work:cached"
+    
+    # ports:
+    #   - "3333:3333"
+
+    cap_add:
+     - SYS_PTRACE
+
+    security_opt:
+     - seccomp:unconfined
+
+    # Overrides default command so things don't shut down after the process ends.
+    # command: sleep infinity
+    command: /bin/sh -c "cp; while sleep 1000; do :; done"
