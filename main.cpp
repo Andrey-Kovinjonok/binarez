@@ -240,7 +240,6 @@ Buffer::const_iterator Any::deserialize(Buffer::const_iterator it, Buffer::const
             {
                 Tracer::Scope s;
                 VectorType vec;
-                vec.items.reserve(size);
                 for (Id i = 0; i < size; ++i) {
                     Any item;
                     it = item.deserialize(it, end);
