@@ -1,79 +1,87 @@
 #include <iostream>
+#include <array>
 #include <vector>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <variant>
 #include <string>
 #include <fstream>
 #include <type_traits>
 #include <stdexcept>
+#include <iterator>
 #include <iomanip>
-
-// #define ENABLE_LOGGING
-
-class Any;
-class VectorType;
-
-struct Tracer {
-    static inline int depth = 0;
-    
-    class Scope {
-    public:
-        Scope() noexcept { Tracer::depth++; }
-        ~Scope() noexcept { Tracer::depth--; }
-    };
-
-    static inline void logHex(
-        const std::byte* data,
-        size_t size,
-        const std::string& prefix = ""
-    ) noexcept {
-        #ifdef ENABLE_LOGGING
-        std::cout << std::string(depth*2, ' ') << prefix;
-        for (size_t i = 0; i < size; ++i) {
-            printf("%02x ", static_cast<int>(data[i]));
-        }
-        std::cout << "\n";
-        #endif
-    }
-    
-    static inline void log(char type, const std::string& msg) noexcept {
-        #ifdef ENABLE_LOGGING
-        std::cout << std::string(depth*2, ' ') 
-                << "[" << type << "] " << msg << "\n";
-        #endif
-    }
-};
-
-template <typename T>
-struct DataHolder {
-    T value;
-    
-    explicit DataHolder(T v = T{}) noexcept : value(std::move(v)) {}
-    [[nodiscard]] const T& get() const noexcept { return value; }
-    bool operator==(const DataHolder& o) const noexcept { return value == o.value; }
-};
-
-using IntegerType = DataHolder<uint64_t>;
-using FloatType = DataHolder<double>;
-using StringType = DataHolder<std::string>;
 
 using Id = uint64_t;
 using Buffer = std::vector<std::byte>;
 enum class TypeId : Id { Uint = 0, Float = 1, String = 2, Vector = 3 };
 
+class IntegerType;
+class FloatType;
+class StringType;
+class VectorType;
+class Any;
+
+class Tracer {
+public:
+    static constexpr bool ENABLED = false; // Set to true to enable logging
+
+    static inline int depth = 0;
+
+    class Scope {
+    public:
+        Scope() noexcept { if constexpr (ENABLED) Tracer::depth++; }
+        ~Scope() noexcept { if constexpr (ENABLED) Tracer::depth--; }
+    };
+
+    template<typename... Args>
+    static inline void logHex(Args&&... args) noexcept {
+        if constexpr (ENABLED) {
+            const auto* data = std::get<0>(std::forward_as_tuple(args...));
+            const size_t size = std::get<1>(std::forward_as_tuple(args...));
+            const std::string& prefix = sizeof...(Args) > 2 ? std::get<2>(std::forward_as_tuple(args...)) : "";
+            std::cout << std::string(depth * 2, ' ') << prefix;
+            for (size_t i = 0; i < size; ++i) {
+                printf("%02x ", static_cast<int>(data[i]));
+            }
+            std::cout << "\n";
+        }
+    }
+
+    template<typename... Args>
+    static inline void log(Args&&... args) noexcept {
+        if constexpr (ENABLED) {
+            const char type = std::get<0>(std::forward_as_tuple(args...));
+            const std::string& msg = std::get<1>(std::forward_as_tuple(args...));
+            std::cout << std::string(depth * 2, ' ') << "[" << type << "] " << msg << "\n";
+        }
+    }
+};
+    
 namespace Detail {
+    template<TypeId> struct TypeIdToType;
+    template<> struct TypeIdToType<TypeId::Uint> { using type = IntegerType; };
+    template<> struct TypeIdToType<TypeId::Float> { using type = FloatType; };
+    template<> struct TypeIdToType<TypeId::String> { using type = StringType; };
+    template<> struct TypeIdToType<TypeId::Vector> { using type = VectorType; };
+
     template <typename T>
-    void writeLE(Buffer& buf, T value, const std::string& desc = "") noexcept {
-        // std::array<std::byte, sizeof(T)> bytes;
-        // std::memcpy(bytes.data(), &value, sizeof(T));
+    void writeLE(Buffer& buf, T value, const std::string& desc = "") {
         const auto* ptr = reinterpret_cast<const std::byte*>(&value);
         Tracer::logHex(ptr, sizeof(T), "WRITE " + desc + ": ");
         buf.insert(buf.end(), ptr, ptr + sizeof(T));
     }
 
     template <typename T>
-    [[nodiscard]] T readLE(Buffer::const_iterator& it, const std::string& desc = "") {
+    T readLE(Buffer::const_iterator& it, Buffer::const_iterator end,
+        const std::string& desc = ""
+    ) {
+        if (std::distance(it, end) < static_cast<ptrdiff_t>(sizeof(T))) {
+            throw std::runtime_error("Buffer underflow while reading " + desc +
+                ". Required: " + std::to_string(sizeof(T)) +
+                ", available: " + std::to_string(std::distance(it, end)));
+        }
+        
         T value;
         std::memcpy(&value, &*it, sizeof(T));
         Tracer::logHex(&*it, sizeof(T), "READ " + desc + ": ");
@@ -81,54 +89,161 @@ namespace Detail {
         return value;
     }
 
-    inline void log_raw_data(const Buffer& buf, size_t offset, size_t size, const std::string& desc) noexcept {
-        #ifdef ENABLE_LOGGING
-        Tracer::logHex(buf.data() + offset, size, "RAW " + desc + ": ");
-        #endif
-    }
-
     template<typename T>
     struct is_valid_type : std::disjunction<
-        std::is_same<std::decay_t<T>, IntegerType>,
-        std::is_same<std::decay_t<T>, FloatType>,
-        std::is_same<std::decay_t<T>, StringType>,
-        std::is_same<std::decay_t<T>, VectorType>
+        std::is_same<T, IntegerType>,
+        std::is_same<T, FloatType>,
+        std::is_same<T, StringType>,
+        std::is_same<T, VectorType>
     > {};
 }
 
-class VectorType final {
-    std::vector<Any> items;
+template<typename Derived, typename ValueType>
+class DataHolder {
+protected:
+    ValueType value;
+
+    explicit constexpr DataHolder(ValueType v) noexcept : value(v) {}
+    DataHolder() = default;
+    DataHolder(const DataHolder&) = default;
+    DataHolder(DataHolder&&) noexcept = default;
+    DataHolder& operator=(const DataHolder&) = default;
+    DataHolder& operator=(DataHolder&&) noexcept = default;
+    ~DataHolder() = default;
+
+    friend Derived;
 
 public:
-    VectorType() noexcept = default;
-    VectorType(const VectorType&) = default;
-    VectorType(VectorType&&) noexcept = default;
-    VectorType& operator=(const VectorType&) = default;
-    VectorType& operator=(VectorType&&) noexcept = default;
-
-    template<typename... Args>
-    explicit VectorType(Args&&... args) {
-        items.reserve(sizeof...(Args));
-        (items.emplace_back(std::forward<Args>(args)), ...);
+    [[nodiscard]] static constexpr TypeId getTypeId() noexcept {
+        return Derived::ID;
     }
 
-    void push_back(Any&& item);
-    
-    template<typename Arg>
-    auto push_back(Arg&& val) noexcept -> std::enable_if_t<
-        Detail::is_valid_type<std::decay_t<Arg>>::value
-    > {
-        items.emplace_back(std::forward<Arg>(val));
+    void serialize(Buffer& buf) const {
+        Detail::writeLE(buf, static_cast<Id>(Derived::ID), "TypeID");
+        static_cast<const Derived*>(this)->serializeImpl(buf);
     }
 
-    [[nodiscard]] const std::vector<Any>& get() const noexcept { return items; }
-    bool operator==(const VectorType& o) const noexcept;
+    [[nodiscard]] static Derived deserialize(Buffer::const_iterator& it, Buffer::const_iterator end) {
+        return Derived::deserializeImpl(it, end);
+    }
+    [[nodiscard]] size_t getSerializedSize() const noexcept {
+        return sizeof(Id) + static_cast<const Derived*>(this)->getSerializedSizeImpl();
+    }
+    [[nodiscard]] bool operator==(const DataHolder& o) const noexcept { return value == o.value; }
+    [[nodiscard]] const ValueType& getValue() const noexcept { return value; }
+    [[nodiscard]] ValueType& getValue() noexcept { return value; }
 };
 
-using VariantType = std::variant<IntegerType, FloatType, StringType, VectorType>;
+class IntegerType final : public DataHolder<IntegerType, uint64_t> {
+public:
+    static constexpr TypeId ID = TypeId::Uint;
+    
+    explicit constexpr IntegerType(uint64_t v = 0) noexcept : DataHolder(v) {}
+    
+    void serializeImpl(Buffer& buf) const {
+        Tracer::log('I', "value: " + std::to_string(value));
+        Detail::writeLE(buf, value, "I-Value");
+    }
+
+    [[nodiscard]] static IntegerType deserializeImpl(Buffer::const_iterator& it, Buffer::const_iterator end) {
+        auto val = Detail::readLE<uint64_t>(it, end, "I-Value");
+        Tracer::log('I', "value: " + std::to_string(val));
+        return IntegerType(val);
+    }
+
+    [[nodiscard]] size_t getSerializedSizeImpl() const noexcept {
+        return sizeof(value);
+    }
+};
+
+class FloatType final : public DataHolder<FloatType, double> {
+public:
+    static constexpr TypeId ID = TypeId::Float;
+    
+    explicit constexpr FloatType(double v = 0.0) noexcept : DataHolder(v) {}
+    
+    void serializeImpl(Buffer& buf) const {
+        Tracer::log('F', "value: " + std::to_string(value));
+        Detail::writeLE(buf, value, "F-Value");
+    }
+
+    [[nodiscard]] static FloatType deserializeImpl(Buffer::const_iterator& it, Buffer::const_iterator end) {
+        auto val = Detail::readLE<double>(it, end, "F-Value");
+        Tracer::log('F', "value: " + std::to_string(val));
+        return FloatType(val);
+    }
+
+    [[nodiscard]] size_t getSerializedSizeImpl() const noexcept {
+        return sizeof(value);
+    }
+};
+
+class StringType final : public DataHolder<StringType, std::string> {
+public:
+    static constexpr TypeId ID = TypeId::String;
+    
+    template <typename... Args,
+              typename = std::enable_if_t<std::is_constructible_v<std::string, Args...>>>
+    explicit StringType(Args&&... args) noexcept(std::is_nothrow_constructible_v<std::string, Args...>)
+        : DataHolder(std::string(std::forward<Args>(args)...)) {}
+
+    void serializeImpl(Buffer& buf) const {
+        Tracer::log('S', "Value: \"" + value + "\"");
+        const Id size = value.size();
+        Detail::writeLE(buf, size, "S-Size");
+        
+        const auto* data = reinterpret_cast<const std::byte*>(value.data());
+        Tracer::logHex(data, value.size(), "S-Data");
+        buf.insert(buf.end(), data, data + size);
+    }
+
+    [[nodiscard]] static StringType deserializeImpl(Buffer::const_iterator& it, Buffer::const_iterator end) {
+        const auto size = Detail::readLE<Id>(it, end, "S-Size");
+        
+        if (std::distance(it, end) < static_cast<ptrdiff_t>(size)) {
+            throw std::runtime_error("String data truncated");
+        }
+
+        std::string str(size, '\0');
+        std::memcpy(str.data(), &*it, size);
+        Tracer::logHex(&*it, size, "S-Data");
+        it += size;
+        
+        Tracer::log('S', "value: \"" + str + "\"");
+        return StringType(std::move(str));
+    }
+
+    [[nodiscard]] size_t getSerializedSizeImpl() const noexcept {
+        return sizeof(Id) + value.size();
+    }
+};
+
+class VectorType final : public DataHolder<VectorType, std::vector<Any>> {
+public:
+    static constexpr TypeId ID = TypeId::Vector;
+
+    template<typename... Args,
+        typename = std::enable_if_t<(Detail::is_valid_type<std::decay_t<Args>>::value && ...)>>
+    explicit VectorType(Args&&... args) noexcept(std::is_nothrow_constructible_v<std::string, Args...>)
+        : DataHolder(std::vector<Any>{}) {
+        value.reserve(sizeof...(Args));
+        (value.emplace_back(std::forward<Args>(args)), ...);
+    }
+
+    template<typename Arg, typename = std::enable_if_t<
+        Detail::is_valid_type<std::decay_t<Arg>>::value>>
+    void push_back(Arg&& val) {
+        value.emplace_back(std::forward<Arg>(val));
+    }
+
+    void serializeImpl(Buffer& buf) const;
+    [[nodiscard]] static VectorType deserializeImpl(Buffer::const_iterator& it, Buffer::const_iterator end);
+    [[nodiscard]] size_t getSerializedSizeImpl() const noexcept;
+};
 
 class Any final {
-    VariantType data;
+private:
+    std::variant<IntegerType, FloatType, StringType, VectorType> data;
 
 public:
     Any() noexcept : data(IntegerType{0}) {}
@@ -137,135 +252,118 @@ public:
     Any& operator=(const Any&) = default;
     Any& operator=(Any&&) noexcept = default;
 
-    template<typename T, typename = std::enable_if_t<
-        Detail::is_valid_type<std::decay_t<T>>::value
-    >>
-    explicit Any(T val) noexcept : data(std::move(val)) {}
+    template<typename T, typename = std::enable_if_t<Detail::is_valid_type<std::decay_t<T>>::value>>
+    explicit Any(T&& val) noexcept(std::is_nothrow_constructible_v<decltype(data), T&&>)
+        : data(std::forward<T>(val)) {
+    }
 
-    [[nodiscard]] TypeId getPayloadTypeId() const noexcept {
+    void serialize(Buffer& buf) const {
+        std::visit([&](const auto& v) { v.serialize(buf); }, data);
+    }
+
+    [[nodiscard]] Buffer::const_iterator deserialize(Buffer::const_iterator it, Buffer::const_iterator end) {
+        const auto typeId = static_cast<TypeId>(Detail::readLE<Id>(it, end, "TypeId"));
+        switch(typeId) {
+            case TypeId::Uint:  data = IntegerType::deserialize(it, end); break;
+            case TypeId::Float: data = FloatType::deserialize(it, end); break;
+            case TypeId::String: data = StringType::deserialize(it, end); break;
+            case TypeId::Vector: data = VectorType::deserialize(it, end); break;
+            default: throw std::runtime_error("Invalid type ID");
+        }
+        return it;
+    }
+
+    [[nodiscard]] size_t getSerializedSize() const noexcept {
+        return std::visit([](const auto& v) { return v.getSerializedSize(); }, data);
+    }
+
+    [[nodiscard]] TypeId getPayloadTypeId() const noexcept { 
         return static_cast<TypeId>(data.index());
     }
 
-    template<typename Type>
-    [[nodiscard]] const auto& getValue() const {
-        return std::get<Type>(data);
+    template<typename T, typename = std::enable_if_t<Detail::is_valid_type<T>::value>>
+    [[nodiscard]] const auto& get() const {
+        if (!std::holds_alternative<T>(data)) {
+            throw std::bad_variant_access{};
+        }
+        return std::get<std::decay_t<T>>(data);
     }
 
     template<TypeId kId>
-    [[nodiscard]] const auto& getValue() const {
-        return std::get<static_cast<std::size_t>(kId)>(data);
+    [[nodiscard]] const auto& get() const {
+        using T = typename Detail::TypeIdToType<kId>::type;
+        return std::get<T>(data);
     }
-
-    void serialize(Buffer& buf) const;
-    Buffer::const_iterator deserialize(Buffer::const_iterator it, Buffer::const_iterator end);
-
+    
     [[nodiscard]] bool operator==(const Any& o) const noexcept { return data == o.data; }
+
 };
 
-void VectorType::push_back(Any&& item) {
-    items.push_back(std::move(item));
-}
-
-bool VectorType::operator==(const VectorType& o) const noexcept {
-    return items == o.items;
-}
-
-void Any::serialize(Buffer& buf) const {
-    std::visit([&](const auto& v) {
-        using T = std::decay_t<decltype(v)>;
-        if constexpr (std::is_same_v<T, IntegerType>) {
-            Tracer::log('I', "value: " + std::to_string(v.get()));
-            Detail::writeLE(buf, static_cast<Id>(TypeId::Uint), "I-TypeId");
-            Detail::writeLE(buf, v.get(), "I-Value");
-        }
-        else if constexpr (std::is_same_v<T, FloatType>) {
-            Tracer::log('F', "value: " + std::to_string(v.get()));
-            Detail::writeLE(buf, static_cast<Id>(TypeId::Float), "F-TypeId");
-            Detail::writeLE(buf, v.get(), "F-Value");
-        }
-        else if constexpr (std::is_same_v<T, StringType>) {
-            Tracer::log('S', "value: \"" + v.get() + "\"");
-            Detail::writeLE(buf, static_cast<Id>(TypeId::String), "S-TypeId");
-            Detail::writeLE(buf, static_cast<Id>(v.get().size()), "S-Size");
-            const auto* bytes = reinterpret_cast<const std::byte*>(v.get().data());
-            Detail::log_raw_data(buf, buf.size(), v.get().size(), "S-Data");
-            buf.insert(buf.end(), bytes, bytes + v.get().size());
-        }
-        else if constexpr (std::is_same_v<T, VectorType>) {
-            const auto& vec = v.get();
-            Tracer::log('V', "(" + std::to_string(vec.size()) + ")");
-            {
-                Tracer::Scope s;
-                Detail::writeLE(buf, static_cast<Id>(TypeId::Vector), "V-TypeId");
-                Detail::writeLE(buf, static_cast<Id>(vec.size()), "V-Size");
-                for (const auto& item : vec) {
-                    item.serialize(buf);
-                }
-            }
-            Tracer::log('V', "end");
-        }
-    }, data);
-}
-
-Buffer::const_iterator Any::deserialize(Buffer::const_iterator it, Buffer::const_iterator end) {
-    TypeId typeId = static_cast<TypeId>(Detail::readLE<Id>(it, "TypeId"));
+void VectorType::serializeImpl(Buffer& buf) const {
+    Tracer::log('V', "Vector size: " + std::to_string(value.size()));
+    Detail::writeLE(buf, static_cast<Id>(value.size()), "VectorSize");
     
-    switch(typeId) {
-        case TypeId::Uint: {
-            auto val = Detail::readLE<uint64_t>(it, "I-Value");
-            data = IntegerType(val);
-            Tracer::log('I', "value: " + std::to_string(val));
-            break;
+    {
+        Tracer::Scope s;
+        for (const auto& item : value) {
+            item.serialize(buf);
         }
-        case TypeId::Float: {
-            auto val = Detail::readLE<double>(it, "F-Value");
-            data = FloatType(val);
-            Tracer::log('F', "value: " + std::to_string(val));
-            break;
-        }
-        case TypeId::String: {
-            Id size = Detail::readLE<Id>(it, "S-Size");
-            std::string str;
-            str.resize(size);
-            Detail::log_raw_data({it, it + size}, 0, size, "S-Data");
-            std::memcpy(str.data(), &*it, size);
-            it += size;
-            data = StringType(str);
-            Tracer::log('S', "value: \"" + str + "\"");
-            break;
-        }
-        case TypeId::Vector: {
-            Id size = Detail::readLE<Id>(it, "V-Size");
-            Tracer::log('V', "(" + std::to_string(size) + ")");
-            {
-                Tracer::Scope s;
-                VectorType vec;
-                for (Id i = 0; i < size; ++i) {
-                    Any item;
-                    it = item.deserialize(it, end);
-                    vec.push_back(std::move(item));
-                }
-                data = std::move(vec);
-            }
-            Tracer::log('V', "end");
-            break;
-        }
-        default: throw std::runtime_error("Unknown TypeId");
     }
-    return it;
+}
+
+VectorType VectorType::deserializeImpl(Buffer::const_iterator& it, Buffer::const_iterator end) {
+    const auto size = Detail::readLE<Id>(it, end, "VectorSize");
+    Tracer::log('V', "Deserializing vector size: " + std::to_string(size));
+    
+    VectorType vec;
+    vec.value.reserve(size);
+    
+    {
+        Tracer::Scope s;
+        for (Id i = 0; i < size; ++i) {
+            Any item;
+            it = item.deserialize(it, end);
+            vec.value.emplace_back(std::move(item));
+        }
+    }
+    return vec;
+}
+
+size_t VectorType::getSerializedSizeImpl() const noexcept {
+    size_t size = sizeof(Id);
+    for (const auto& item : value) {
+        size += item.getSerializedSize();
+    }
+    return size;
 }
 
 class Serializator final {
+private:
     std::vector<Any> storage;
+
+    size_t calculateSerializedSize() const noexcept {
+        size_t size = sizeof(Id);
+        for (const auto& item : storage) {
+            size += sizeof(Id);
+            size += item.getSerializedSize();
+        }
+        return size;
+    }
 
 public:
     template<typename Arg>
     void push(Arg&& val) {
-        storage.emplace_back(std::forward<Arg>(val));
+        if constexpr (std::is_same_v<std::decay_t<Arg>, VectorType>) {
+            storage.emplace_back(VectorType(std::move(val)));
+        } else {
+            storage.emplace_back(std::forward<Arg>(val));
+        }
     }
 
     [[nodiscard]] Buffer serialize() const {
         Buffer buf;
+        buf.reserve(calculateSerializedSize());
+
         Tracer::log(' ', "Serialization START");
         {
             Tracer::Scope s;
@@ -284,7 +382,7 @@ public:
         {
             Tracer::Scope s;
             auto it = buff.begin();
-            Id size = Detail::readLE<Id>(it, "Storage-Size");
+            Id size = Detail::readLE<Id>(it, buff.end(), "Storage-Size");
             result.reserve(size);
             for (Id i = 0; i < size; ++i) {
                 Any any;
@@ -340,7 +438,7 @@ int main() {
             std::byte{0x94}, std::byte{0x88}, std::byte{0x01}, std::byte{0x00},
             std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}
         };
-    
+
         auto res = Serializator::deserialize(manual_data);
 
         Serializator serializer;
@@ -349,10 +447,10 @@ int main() {
         }
         
         Buffer new_buf = serializer.serialize();
-        std::cout << "Result: " << (manual_data == new_buf) << std::endl;
+        std::cout << "Result: " << (manual_data == new_buf) << "\n";
     }
     catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }
 
@@ -365,30 +463,32 @@ int main() {
         };
 
         Serializator s;
+        s.push(StringType("qwerty"));
+        s.push(IntegerType(100500));
         s.push(vec);
         Buffer test_buf = s.serialize();
         
         auto test_res = Serializator::deserialize(test_buf);
-        bool test_ok = test_res.size() == 1 && 
-                      test_res[0].getPayloadTypeId() == TypeId::Vector;
+        bool test_ok = test_res.size() == 3 && 
+                      test_res[0].getPayloadTypeId() == TypeId::String;
         
         if (test_ok) {
-            const auto& res_vec = test_res[0].getValue<VectorType>().get();
+            const auto& res_vec = test_res[2].get<VectorType>().getValue();
             test_ok = res_vec.size() == 2 &&
-                     res_vec[0].getPayloadTypeId() == TypeId::String &&
-                     res_vec[0].getValue<StringType>().get() == "qwerty" &&
-                     res_vec[1].getPayloadTypeId() == TypeId::Uint &&
-                     res_vec[1].getValue<IntegerType>().get() == 100500;
+                res_vec[0].getPayloadTypeId() == TypeId::String &&
+                res_vec[0].get<StringType>().getValue() == "qwerty" &&
+                res_vec[1].getPayloadTypeId() == TypeId::Uint &&
+                res_vec[1].get<IntegerType>().getValue() == 100500;
         }
         
         std::cout << "\nManual test result: " << test_ok << std::endl;
-    } catch (const std::exception& e) {
+    }
+    catch (const std::exception& e) {
         std::cerr << "Manual test failed: " << e.what() << std::endl;
         return 1;
     }
 
     // return 0;
-
 
     // ==================== TEST ORIGINAL ==============================
     std::cout << "File processing ... \n";
