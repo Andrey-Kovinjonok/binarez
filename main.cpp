@@ -108,6 +108,7 @@ public:
 
     template<typename... Args>
     explicit VectorType(Args&&... args) {
+        items.reserve(sizeof...(Args));
         (items.emplace_back(std::forward<Args>(args)), ...);
     }
 
@@ -239,6 +240,7 @@ Buffer::const_iterator Any::deserialize(Buffer::const_iterator it, Buffer::const
             {
                 Tracer::Scope s;
                 VectorType vec;
+                vec.items.reserve(size);
                 for (Id i = 0; i < size; ++i) {
                     Any item;
                     it = item.deserialize(it, end);
@@ -284,6 +286,7 @@ public:
             Tracer::Scope s;
             auto it = buff.begin();
             Id size = Detail::readLE<Id>(it, "Storage-Size");
+            result.reserve(size);
             for (Id i = 0; i < size; ++i) {
                 Any any;
                 it = any.deserialize(it, buff.end());
